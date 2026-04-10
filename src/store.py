@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from .chunking import _dot
+from .chunking import compute_similarity
 from .embeddings import _mock_embed
 from .models import Document
 
@@ -37,36 +37,55 @@ class EmbeddingStore:
             self._collection = None
 
     def _make_record(self, doc: Document) -> dict[str, Any]:
-        # TODO: build a normalized stored record for one document
-        raise NotImplementedError("Implement EmbeddingStore._make_record")
+        """Build a normalized stored record for one document."""
+        return {
+            "id": doc.id,
+            "content": doc.content,
+            "embedding": self._embedding_fn(doc.content),
+            "metadata": doc.metadata
+        }
 
     def _search_records(self, query: str, records: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
-        # TODO: run in-memory similarity search over provided records
-        raise NotImplementedError("Implement EmbeddingStore._search_records")
+        """Run in-memory similarity search over provided records."""
+        if not records:
+            return []
+            
+        query_embedding = self._embedding_fn(query)
+        
+        # Calculate similarity scores
+        scored_records = []
+        for rec in records:
+            score = compute_similarity(query_embedding, rec["embedding"])
+            # Create a shallow copy and add the score
+            scored_copy = rec.copy()
+            scored_copy["score"] = score
+            scored_records.append(scored_copy)
+            
+        # Sort by score descending
+        scored_records.sort(key=lambda x: x["score"], reverse=True)
+        return scored_records[:top_k]
 
     def add_documents(self, docs: list[Document]) -> None:
         """
         Embed each document's content and store it.
-
-        For ChromaDB: use collection.add(ids=[...], documents=[...], embeddings=[...])
+        
         For in-memory: append dicts to self._store
         """
-        # TODO: embed each doc and add to store
-        raise NotImplementedError("Implement EmbeddingStore.add_documents")
+        for doc in docs:
+            record = self._make_record(doc)
+            self._store.append(record)
 
     def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         """
         Find the top_k most similar documents to query.
-
-        For in-memory: compute dot product of query embedding vs all stored embeddings.
+        
+        For in-memory: compute cosine similarity of query embedding vs all stored embeddings.
         """
-        # TODO: embed query, compute similarities, return top_k
-        raise NotImplementedError("Implement EmbeddingStore.search")
+        return self._search_records(query, self._store, top_k)
 
     def get_collection_size(self) -> int:
         """Return the total number of stored chunks."""
-        # TODO
-        raise NotImplementedError("Implement EmbeddingStore.get_collection_size")
+        return len(self._store)
 
     def search_with_filter(self, query: str, top_k: int = 3, metadata_filter: dict = None) -> list[dict]:
         """
@@ -74,14 +93,31 @@ class EmbeddingStore:
 
         First filter stored chunks by metadata_filter, then run similarity search.
         """
-        # TODO: filter by metadata, then search among filtered chunks
-        raise NotImplementedError("Implement EmbeddingStore.search_with_filter")
+        if not metadata_filter:
+            return self.search(query, top_k)
+            
+        filtered_records = []
+        for rec in self._store:
+            # Match if all items in filter exist and match in record metadata
+            match = True
+            for key, value in metadata_filter.items():
+                if rec["metadata"].get(key) != value:
+                    match = False
+                    break
+            if match:
+                filtered_records.append(rec)
+                
+        return self._search_records(query, filtered_records, top_k)
 
     def delete_document(self, doc_id: str) -> bool:
         """
-        Remove all chunks belonging to a document.
+        Remove all chunks belonging to a document (based on ID or 'doc_id' in metadata).
 
         Returns True if any chunks were removed, False otherwise.
         """
-        # TODO: remove all stored chunks where metadata['doc_id'] == doc_id
-        raise NotImplementedError("Implement EmbeddingStore.delete_document")
+        initial_count = len(self._store)
+        self._store = [
+            rec for rec in self._store 
+            if rec["id"] != doc_id and rec["metadata"].get("doc_id") != doc_id
+        ]
+        return len(self._store) < initial_count

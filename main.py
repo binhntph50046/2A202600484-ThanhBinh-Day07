@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
+import sys
+
+# Ensure terminal output supports UTF-8 (especially for Vietnamese characters on Windows)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
 
 from dotenv import load_dotenv
 
